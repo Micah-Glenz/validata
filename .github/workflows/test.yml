@@ -1,0 +1,160 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        exclude:
+          # Reduce matrix size for faster runs
+          - os: windows-latest
+            python-version: "3.8"
+          - os: macOS-latest
+            python-version: "3.8"
+          - os: windows-latest
+            python-version: "3.9"
+          - os: macOS-latest
+            python-version: "3.9"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install package in development mode
+      run: pip install -e .
+
+    - name: Run comprehensive tests
+      run: |
+        python test_validation_schema_comprehensive.py
+
+    - name: Test package imports
+      run: |
+        python -c "
+        import validata
+        print(f'✅ Validata {validata.__version__} imported successfully')
+        
+        # Test basic functionality
+        import pandas as pd
+        data = pd.DataFrame({'a': [1, 2, 3], 'b': ['x', 'y', 'z']})
+        api = validata.ValidataAPI()
+        result = api.profile_data(data, minimal=True)
+        print(f'✅ Basic profiling works - Shape: {result[\"summary\"][\"shape\"]}')
+        "
+
+    - name: Test convenience functions
+      run: |
+        python -c "
+        from validata import quick_profile, quick_clean, quick_analyze
+        import pandas as pd
+        
+        data = pd.DataFrame({'x': [1, 2, 3, None], 'y': ['a', 'b', 'c', 'd']})
+        
+        # Test quick functions
+        profile = quick_profile(data)
+        print('✅ quick_profile works')
+        
+        cleaned = quick_clean(data)
+        print('✅ quick_clean works')
+        
+        analysis = quick_analyze(data, 'test_table')
+        print('✅ quick_analyze works')
+        print('🎯 All convenience functions working!')
+        "
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+    
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black mypy
+        pip install -r requirements.txt
+    
+    - name: Run flake8
+      run: flake8 validata/ --max-line-length=88 --extend-ignore=E203,W503
+    
+    - name: Check black formatting
+      run: black --check validata/
+    
+    - name: Run mypy (allow failures for now)
+      run: mypy validata/ || true
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+    
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+    
+    - name: Run bandit security scan
+      run: bandit -r validata/ -f json -o bandit-report.json || true
+    
+    - name: Run safety check
+      run: safety check || true
+
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+    
+    - name: Install build tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+    
+    - name: Build package
+      run: python -m build
+    
+    - name: Check package
+      run: twine check dist/*
+    
+    - name: Test wheel installation
+      run: |
+        pip install dist/*.whl
+        python -c "import validata; print(f'✅ Wheel install successful: {validata.__version__}')"
